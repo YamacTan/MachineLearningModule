@@ -211,11 +211,14 @@ df.shape
 df.isnull().sum()
 df.describe().T
 df.head(15)
+
 # %%
 # Görev 1
 
+#Adım 1
 cat_cols, num_cols, cat_but_car = grab_col_names(df)
 
+#Adım 2
 df.dtypes
 df["TotalCharges"] = pd.to_numeric(df["TotalCharges"])
 for x in range (len(df)):
@@ -223,13 +226,63 @@ for x in range (len(df)):
         df.loc[x, "TotalCharges"] = np.nan
 df.dtypes  #Checked
 
+#Adım 3 -
 for col in num_cols:
     num_summary(df, col)
 for col in cat_cols:
     cat_summary(df, col)
 
-for col in num_cols:
-    target_summary_with_num(df, "Churn", col)
+#Adım 4 # FIXME: : Burada bir sorun olabilir. Fix.
 for col in cat_cols:
     target_summary_with_cat(df, "Churn", col)
 
+df.groupby("Churn").mean()
+
+#Adım 5
+
+for col in num_cols:
+    print(col, check_outlier(df, col))
+
+# # TODO: Aykırı gözlem varsa replace_with_thresholds ekle.
+
+#Adım 6:
+
+missing_values_table(df)
+
+#TODO: Eksik deger varsa doldur.
+
+
+# %%
+# Görev 2
+
+#Adım 1:
+
+for col in num_cols:
+    print(col, check_outlier(df, col))
+
+missing_values_table(df)
+
+# Datasette eksik ya da aykırı gözlem bulunmadığından bir işlem yapmaya gerek yoktur.
+
+#TODO: Muhtemelen eksik ve aykırı gözlem yok ama eger varsa burada onları düzelt.
+
+#Adım 2:
+df.loc[(df['tenure'] > 33), "customer_class"] = "loyal"
+df.loc[(df['tenure'] <= 33), "customer_class"] = "standard"
+# TODO: Buraya birkaç yeni değişken daha ekle.
+
+#Adım 3:
+
+binary_cols = [col for col in df.columns if df[col].dtype not in [int, float] and df[col].nunique() == 2]
+for col in binary_cols:
+    label_encoder(df, col)
+
+ohe_cols = [col for col in df.columns if 10 >= df[col].nunique() > 2]
+
+df = one_hot_encoder(df, ohe_cols)
+
+#Adım 4:
+
+cat_cols, num_cols, cat_but_car = grab_col_names(df)
+scaler = StandardScaler()
+df[num_cols] = scaler.fit_transform(df[num_cols])
