@@ -5,21 +5,18 @@
 # %%
 
 import warnings
-import joblib
-import pydotplus
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from sklearn.preprocessing import LabelEncoder, StandardScaler, RobustScaler
-from sklearn.tree import DecisionTreeClassifier, export_graphviz, export_text, DecisionTreeRegressor
-from sklearn.metrics import classification_report, roc_auc_score
-from sklearn.tree import DecisionTreeClassifier, export_graphviz, export_text, DecisionTreeRegressor
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_validate, validation_curve, cross_val_score
-from skompiler import skompile
-from sklearn.metrics import mean_squared_error, mean_absolute_error  # Metrikler
-from sklearn.model_selection import train_test_split, cross_val_score
-import graphviz
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
+from sklearn.model_selection import GridSearchCV, cross_validate
+from sklearn.model_selection import train_test_split
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', 90)
@@ -203,7 +200,17 @@ def num_summary(dataframe, numerical_col, plot=False):
         plt.title(numerical_col)
         plt.show()
 
-
+def plot_importance(model, features, num=len(X), save=False):
+    feature_imp = pd.DataFrame({'Value': model.feature_importances_, 'Feature': features.columns})
+    plt.figure(figsize=(10, 10))
+    sns.set(font_scale=1)
+    sns.barplot(x="Value", y="Feature", data=feature_imp.sort_values(by="Value",
+                                                                     ascending=False)[0:num])
+    plt.title('Features')
+    plt.tight_layout()
+    plt.show()
+    if save:
+        plt.savefig('importances.png')
 # %%
 
 df = pd.read_csv("Odevler/HAFTA_08 YAPAY OGRENME PART 2/PROJE_II/Telco-Customer-Churn.csv")
@@ -220,10 +227,11 @@ cat_cols, num_cols, cat_but_car = grab_col_names(df)
 
 #Adım 2
 df.dtypes
-df["TotalCharges"] = pd.to_numeric(df["TotalCharges"])
+
 for x in range (len(df)):
     if (df.loc[x, "TotalCharges"]) == " ":
         df.loc[x, "TotalCharges"] = np.nan
+df["TotalCharges"] = pd.to_numeric(df["TotalCharges"])
 df.dtypes  #Checked
 
 #Adım 3 -
@@ -232,7 +240,10 @@ for col in num_cols:
 for col in cat_cols:
     cat_summary(df, col)
 
-#Adım 4 # FIXME: : Burada bir sorun olabilir. Fix.
+#Adım 4
+
+# The reason for the error in the target variable analysis in this section is that the Churn variable has
+# "Yes" and "No" values. This will be fixed after binary encoding.
 for col in cat_cols:
     target_summary_with_cat(df, "Churn", col)
 
@@ -242,14 +253,13 @@ df.groupby("Churn").mean()
 
 for col in num_cols:
     print(col, check_outlier(df, col))
-
-# # TODO: Aykırı gözlem varsa replace_with_thresholds ekle.
+# There are not any outlier values.
 
 #Adım 6:
 
 missing_values_table(df)
+df["TotalCharges"] = df["TotalCharges"].fillna(df["TotalCharges"].mean())
 
-#TODO: Eksik deger varsa doldur.
 
 
 # %%
@@ -264,18 +274,18 @@ missing_values_table(df)
 
 # Datasette eksik ya da aykırı gözlem bulunmadığından bir işlem yapmaya gerek yoktur.
 
-#TODO: Muhtemelen eksik ve aykırı gözlem yok ama eger varsa burada onları düzelt.
-
 #Adım 2:
 df.loc[(df['tenure'] > 33), "customer_class"] = "loyal"
 df.loc[(df['tenure'] <= 33), "customer_class"] = "standard"
-# TODO: Buraya birkaç yeni değişken daha ekle.
 
 #Adım 3:
 
 binary_cols = [col for col in df.columns if df[col].dtype not in [int, float] and df[col].nunique() == 2]
 for col in binary_cols:
     label_encoder(df, col)
+
+for col in cat_cols:
+    target_summary_with_cat(df, "Churn", col)
 
 ohe_cols = [col for col in df.columns if 10 >= df[col].nunique() > 2]
 
@@ -286,3 +296,219 @@ df = one_hot_encoder(df, ohe_cols)
 cat_cols, num_cols, cat_but_car = grab_col_names(df)
 scaler = StandardScaler()
 df[num_cols] = scaler.fit_transform(df[num_cols])
+
+# %%
+# Görev 3
+
+df.head()
+df.drop("customerID", axis = 1, inplace= True)
+
+y = df["Churn"]
+X = df.drop(["Churn"], axis=1)
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=1)
+
+
+# 1 - DecisionTreeClassifier
+cart_model = DecisionTreeClassifier(random_state=1).fit(X, y)
+
+# Cross validate, yukarıda yazdıgımız fit methodunu görmezden gelir.
+
+cv_results = cross_validate(cart_model,
+                            X, y,
+                            cv=10,
+                            scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7299427788523534
+cv_results['test_f1'].mean()
+# 0.49946105770892774
+cv_results['test_roc_auc'].mean()
+# 0.6604916232362472
+
+
+# 2 - RandomForestClassifier
+
+rf_model = RandomForestClassifier(random_state=1)
+rf_model.get_params()
+
+cv_results = cross_validate(rf_model, X, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7931262088974854
+cv_results['test_f1'].mean()
+# 0.556658842144538
+cv_results['test_roc_auc'].mean()
+# 0.8269607481133804
+
+# 3 - GBM
+gbm_model = GradientBoostingClassifier(random_state=1)
+gbm_model.get_params()
+
+cv_results = cross_validate(gbm_model, X, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+cv_results['test_accuracy'].mean()
+# 0.8050531914893616
+cv_results['test_f1'].mean()
+# 0.5883868707258069
+cv_results['test_roc_auc'].mean()
+# 0.847430122875098
+
+# 4 - XGBoost
+
+xgboost_model = XGBClassifier(random_state=1, use_label_encoder=False)
+xgboost_model.get_params()
+
+cv_results = cross_validate(xgboost_model, X, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7881570357833656
+cv_results['test_f1'].mean()
+# 0.5630368305374369
+cv_results['test_roc_auc'].mean()
+# 0.824520556433248
+
+
+# 5 - LightGBM
+
+lgbm_model = LGBMClassifier(random_state=1)
+lgbm_model.get_params()
+
+cv_results = cross_validate(lgbm_model, X, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7983808833010961
+cv_results['test_f1'].mean()
+# 0.5791640459704356
+cv_results['test_roc_auc'].mean()
+# 0.8361987945059159
+
+
+# 6 - Catboost Model
+
+catboost_model = CatBoostClassifier(random_state=1, verbose=False)
+catboost_model.get_params()
+
+cv_results = cross_validate(catboost_model, X, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.799940965506125
+cv_results['test_f1'].mean()
+# 0.5785616313995834
+cv_results['test_roc_auc'].mean()
+# 0.8413579068151866
+
+# Best 4 Models for Accuracy:
+#  1 - GBM
+#  2 - CatBoost
+#  3 - LightGBM
+#  4 - RandomTreeClassifier
+
+# %%
+
+# GBM Parameter Optimization
+gbm_params = {"learning_rate": [0.01, 0.1],
+              "max_depth": [3, 5, 7],
+              "n_estimators": [100, 500, 600],
+              "subsample": [1, 0.5, 0.7]}
+
+gbm_best_grid = GridSearchCV(gbm_model, gbm_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+
+gbm_best_grid.best_params_
+
+gbm_final = gbm_model.set_params(**gbm_best_grid.best_params_, random_state=1 ).fit(X, y)
+
+
+# CatBoost Parameter Optimization
+
+catboost_params = {"iterations": [200, 500],
+                   "learning_rate": [0.01, 0.1],
+                   "depth": [3, 6]}
+
+
+catboost_best_grid = GridSearchCV(catboost_model, catboost_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+catboost_best_grid.best_params_
+catboost_final = catboost_model.set_params(**catboost_best_grid.best_params_, random_state=1).fit(X, y)
+
+
+# LightGBM Parameter Optimization
+lgbm_params = {"learning_rate": [0.01, 0.1],
+               "n_estimators": [100, 300, 500],
+               "colsample_bytree": [0.5, 1]}
+
+
+lgbm_best_grid = GridSearchCV(lgbm_model, lgbm_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+lgbm_best_grid.best_params_
+lgbm_final = lgbm_model.set_params(**lgbm_best_grid.best_params_, random_state=1).fit(X, y)
+
+
+
+
+# RandomForest Parameter Optimization
+rf_params = {"max_depth": [5, None],
+             "max_features": [3, 5, "auto"],
+             "min_samples_split": [2, 5, 8],
+             "n_estimators": [100, 200]}
+
+rf_best_grid = GridSearchCV(rf_model, rf_params, cv=5, n_jobs=-1, verbose=True).fit(X, y)
+
+rf_best_grid.best_params_
+
+rf_final = rf_model.set_params(**rf_best_grid.best_params_, random_state=1).fit(X, y)
+
+# %%
+
+plot_importance(gbm_final, X)
+gbm_most_importants = X[["tenure", "InternetService_Fiber optic", "MonthlyCharges", "TotalCharges"]]
+plot_importance(catboost_final, X)
+catboost_most_importants = X[["tenure", "Contract_Two year", "MonthlyCharges", "TotalCharges"]]
+plot_importance(lgbm_final, X)
+lgbm_most_importants = X[["tenure", "PaperlessBilling", "MonthlyCharges", "TotalCharges"]]
+plot_importance(rf_final, X)
+rf_most_importants = X[["tenure", "customer_class", "MonthlyCharges", "TotalCharges"]]
+
+# %%
+
+#GBM Final with Best Params and Most Importants
+cv_results = cross_validate(gbm_final, gbm_most_importants, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7934098968407479
+cv_results['test_f1'].mean()
+# 0.5546490779277797
+cv_results['test_roc_auc'].mean()
+# 0.8293471840199971
+
+#Catboost Final with Best Params and Most Importants
+cv_results = cross_validate(catboost_final, catboost_most_importants, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7939780786589298
+cv_results['test_f1'].mean()
+# 0.5360153730453043
+cv_results['test_roc_auc'].mean()
+# 0.8306218646612062
+
+#LGBM Final with Best Params and Most Importants
+cv_results = cross_validate(lgbm_final, lgbm_most_importants, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7908558994197292
+cv_results['test_f1'].mean()
+# 0.5243213309766566
+cv_results['test_roc_auc'].mean()
+# 0.821946174861384
+
+#LGBM Final with Best Params and Most Importants
+cv_results = cross_validate(rf_final, rf_most_importants, y, cv=10, scoring=["accuracy", "f1", "roc_auc"])
+
+cv_results['test_accuracy'].mean()
+# 0.7706935041908445
+cv_results['test_f1'].mean()
+# 0.5153137668221844
+cv_results['test_roc_auc'].mean()
+# 0.7811300304750696
+
+# When the models whose parameters are optimized are run again with the "main" variables,which are the most weighted in
+# terms of importance, they give almost similar results with a training set that contains too many variables.
+# What can be understood here is that the contribution of the variables in the dataset that are not of high importance to
+# the model success is quite low.
